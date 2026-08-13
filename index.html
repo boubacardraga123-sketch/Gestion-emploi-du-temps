@@ -3514,6 +3514,7 @@ function showTab(id) {
               <div style="display:flex;gap:8px;" class="ge-print-hide">
                 <button class="ge-btn ge-btn-ghost" onclick="geFicheImprimer()">🖨️ Imprimer</button>
                 <button class="ge-btn ge-btn-ghost" onclick="geFichePDF(this)">📥 Télécharger en PDF</button>
+                <button class="ge-btn ge-btn-ghost" onclick="geFichePartager(this)">📲 Partager (WhatsApp/Email)</button>
               </div>
             </div>
             <!-- Sélecteur élève -->
@@ -3954,7 +3955,8 @@ function showTab(id) {
       <div class="ge-field"><label>Classe / Niveau</label><input type="text" class="ge-input" id="ge-f-classe" placeholder="ex: 1ère A"></div>
       <div class="ge-field"><label>Statut d'inscription</label><select class="ge-select" id="ge-f-statut"><option>Inscrit</option><option>En attente</option><option>Suspendu</option><option>Exclu</option></select></div>
       <div class="ge-field"><label>Nom du tuteur</label><input type="text" class="ge-input" id="ge-f-tuteur" placeholder="Nom du tuteur"></div>
-      <div class="ge-field ge-full"><label>Téléphone du tuteur</label><input type="text" class="ge-input" id="ge-f-tel-tuteur" placeholder="+224 6XX XX XX XX"></div>
+      <div class="ge-field"><label>Téléphone du tuteur</label><input type="text" class="ge-input" id="ge-f-tel-tuteur" placeholder="+224 6XX XX XX XX"></div>
+      <div class="ge-field ge-full"><label>Email du tuteur</label><input type="email" class="ge-input" id="ge-f-email-tuteur" placeholder="exemple@email.com"></div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1.5rem;">
       <button class="ge-btn ge-btn-ghost" onclick="geCloseModal('ge-modal-add-etud')">Annuler</button>
@@ -5633,7 +5635,7 @@ function geCloseModal(id) {
     const _t = (elId, txt) => { const el = document.getElementById(elId); if(el) el.textContent = txt; };
     _t('ge-modal-etud-title', '➕ Ajouter un élève');
     _v('ge-edit-idx', -1);
-    ['ge-f-matricule','ge-f-nom','ge-f-prenom','ge-f-lieu','ge-f-classe','ge-f-tuteur','ge-f-tel-tuteur'].forEach(i=>_v(i,''));
+    ['ge-f-matricule','ge-f-nom','ge-f-prenom','ge-f-lieu','ge-f-classe','ge-f-tuteur','ge-f-tel-tuteur','ge-f-email-tuteur'].forEach(i=>_v(i,''));
     _v('ge-f-dob', '');
     _v('ge-f-sexe', 'M');
     _v('ge-f-option', '');
@@ -5708,6 +5710,7 @@ function geSaveEtudiant() {
     statut: document.getElementById('ge-f-statut').value,
     tuteur: document.getElementById('ge-f-tuteur').value.trim(),
     telTuteur: document.getElementById('ge-f-tel-tuteur').value.trim(),
+    emailTuteur: document.getElementById('ge-f-email-tuteur').value.trim(),
     photo: document.getElementById('ge-f-photo').value || (idx >= 0 ? (geEtudiants[idx].photo || '') : ''),
   };
   if(!etud.nom || !etud.prenom) { alert('Nom et Prénom sont obligatoires.'); return; }
@@ -5733,6 +5736,7 @@ function geEditEtudiant(idx) {
   document.getElementById('ge-f-statut').value = e.statut;
   document.getElementById('ge-f-tuteur').value = e.tuteur||'';
   document.getElementById('ge-f-tel-tuteur').value = e.telTuteur||'';
+  document.getElementById('ge-f-email-tuteur').value = e.emailTuteur||'';
   // Charger la photo existante
   const photoVal = e.photo || '';
   document.getElementById('ge-f-photo').value = photoVal;
@@ -6995,6 +6999,101 @@ async function geFichePDF(btn) {
   }
 }
 
+// ── Partage PDF (WhatsApp / Email) — helpers génériques ──────────────
+async function mepuaGenererPDFDepuisElement(el) {
+  if (typeof window.jspdf === 'undefined' || typeof html2canvas === 'undefined') {
+    throw new Error('Librairie PDF non chargée');
+  }
+  const { jsPDF } = window.jspdf;
+  const canvas = await html2canvas(el, { scale: 2.5, useCORS: true, backgroundColor: '#ffffff', logging: false });
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = 210, pageH = 297, margin = 8;
+  const contentW = pageW - margin * 2;
+  const contentH = pageH - margin * 2;
+  const pxPerMm = canvas.width / contentW;
+  const sliceH_px = contentH * pxPerMm;
+  const totalPages = Math.max(1, Math.ceil(canvas.height / sliceH_px));
+  for (let i = 0; i < totalPages; i++) {
+    if (i > 0) pdf.addPage();
+    const sy = i * sliceH_px;
+    const sh = Math.min(sliceH_px, canvas.height - sy);
+    const sliceCanvas = document.createElement('canvas');
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = sh;
+    const ctx = sliceCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+    ctx.drawImage(canvas, 0, sy, canvas.width, sh, 0, 0, canvas.width, sh);
+    const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95);
+    const imgH_mm = sh / pxPerMm;
+    pdf.addImage(imgData, 'JPEG', margin, margin, contentW, imgH_mm);
+  }
+  return pdf.output('blob');
+}
+
+async function mepuaPartagerPDF(blob, filename, opts) {
+  opts = opts || {};
+  const tel = (opts.tel || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+  const file = new File([blob], filename, { type: 'application/pdf' });
+
+  // 1) Méthode idéale : sheet de partage natif (permet de choisir WhatsApp, Gmail, etc.)
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: opts.titre || filename, text: opts.texte || '' });
+      return true;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return false; // annulé par l'utilisateur
+      console.error(err);
+    }
+  }
+
+  // 2) Repli : téléchargement du PDF + ouverture assistée de WhatsApp / Email
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+
+  alert(`📄 "${filename}" a été téléchargé.\n\nVotre navigateur ne permet pas d'attacher automatiquement un fichier à WhatsApp ou à un e-mail. WhatsApp et/ou votre application e-mail vont s'ouvrir : joignez-y simplement le fichier PDF téléchargé.`);
+
+  if (tel) {
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(opts.texte || opts.titre || filename)}`, '_blank');
+  } else if (opts.ouvrirWhatsAppSansNumero) {
+    window.open(`https://wa.me/?text=${encodeURIComponent(opts.texte || opts.titre || filename)}`, '_blank');
+  }
+  if (opts.email) {
+    window.open(`mailto:${opts.email}?subject=${encodeURIComponent(opts.titre || filename)}&body=${encodeURIComponent((opts.texte || '') + '\n\n(Veuillez joindre le fichier PDF téléchargé)')}`, '_blank');
+  }
+  return false;
+}
+
+async function geFichePartager(btn) {
+  const zone = document.getElementById('ge-fiche-print-zone');
+  if (!zone) { alert('Sélectionnez d\'abord un élève.'); return; }
+  const mat = document.getElementById('ge-fiche-select')?.value;
+  const e = geEtudiants.find(x => x.matricule === mat);
+  if (!e) { alert('Sélectionnez d\'abord un élève.'); return; }
+  const filename = `Fiche_${(e.nom||'').replace(/\s+/g,'_')}_${(e.prenom||'').replace(/\s+/g,'_')}.pdf`;
+
+  const oldText = btn ? btn.innerHTML : null;
+  if (btn) { btn.innerHTML = '⏳ Préparation…'; btn.disabled = true; }
+  try {
+    const blob = await mepuaGenererPDFDepuisElement(zone);
+    await mepuaPartagerPDF(blob, filename, {
+      tel: e.telTuteur || '',
+      email: e.emailTuteur || '',
+      titre: `Fiche individuelle — ${e.nom} ${e.prenom}`,
+      texte: `Fiche individuelle de ${e.nom} ${e.prenom} (${e.classe||''})`,
+      ouvrirWhatsAppSansNumero: true
+    });
+  } catch (err) {
+    console.error(err);
+    alert('⚠️ Échec de la préparation du PDF à partager.');
+  } finally {
+    if (btn) { btn.innerHTML = oldText; btn.disabled = false; }
+  }
+}
+
 function geFicheImprimer() {
   const zone = document.getElementById('ge-fiche-print-zone');
   if (!zone) { alert('Sélectionnez d\'abord un élève.'); return; }
@@ -7242,6 +7341,7 @@ function geBulletinHTML(e, periodeVal) {
     <!-- BOUTONS (masqués à l'impression) -->
     <div style="padding:10px 22px;border-top:1px solid #e8e4dd;display:flex;gap:8px;" class="ge-print-hide">
       <button class="ge-btn ge-btn-ghost" style="font-size:12px;" onclick="geImprimerBulletin('${e.matricule}')">🖨️ Imprimer ce bulletin</button>
+      <button class="ge-btn ge-btn-ghost" style="font-size:12px;" onclick="geBulletinPartager('${e.matricule}', this)">📲 Partager (WhatsApp/Email)</button>
     </div>
   </div>`;
 }
@@ -7316,6 +7416,39 @@ function gePrintTousBulletins() {
   </style></head><body>${bulHTML}</body></html>`);
   w.document.close();
   w.onload = () => { w.focus(); w.print(); w.close(); };
+}
+
+async function geBulletinPartager(matricule, btn) {
+  const e = geEtudiants.find(x => x.matricule === matricule);
+  if (!e) return;
+  const periodeVal = document.getElementById('ge-bul-periode')?.value || 'ann';
+  const filename = `Bulletin_${(e.nom||'').replace(/\s+/g,'_')}_${(e.prenom||'').replace(/\s+/g,'_')}.pdf`;
+
+  const oldText = btn ? btn.innerHTML : null;
+  if (btn) { btn.innerHTML = '⏳ Préparation…'; btn.disabled = true; }
+
+  const holder = document.createElement('div');
+  holder.style.cssText = 'position:fixed;left:-9999px;top:0;width:820px;background:#fff;';
+  holder.innerHTML = geBulletinHTML(e, periodeVal);
+  document.body.appendChild(holder);
+  holder.querySelectorAll('.ge-print-hide').forEach(x => x.style.display = 'none');
+
+  try {
+    const blob = await mepuaGenererPDFDepuisElement(holder.firstElementChild || holder);
+    await mepuaPartagerPDF(blob, filename, {
+      tel: e.telTuteur || '',
+      email: e.emailTuteur || '',
+      titre: `Bulletin de notes — ${e.nom} ${e.prenom}`,
+      texte: `Bulletin scolaire de ${e.nom} ${e.prenom} (${e.classe||''})`,
+      ouvrirWhatsAppSansNumero: true
+    });
+  } catch (err) {
+    console.error(err);
+    alert('⚠️ Échec de la préparation du PDF à partager.');
+  } finally {
+    document.body.removeChild(holder);
+    if (btn) { btn.innerHTML = oldText; btn.disabled = false; }
+  }
 }
 
 // ── MEPUA : INFOS ÉTABLISSEMENT / DIRECTEUR ─────────────────
