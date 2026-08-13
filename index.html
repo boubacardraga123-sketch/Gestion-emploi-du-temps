@@ -19,7 +19,8 @@
 <script>
 /* ============================================================
    MEPUA — RÉCUPÉRATION CLOUD AU DÉMARRAGE (Firestore)
-   Projet Firebase : gestion-c99df (le même que "Gestion Scolaire")
+   Projet Firebase : emploi-temps (même projet que "Gestion Scolaire"
+   et que la synchro cloud plus bas dans ce fichier)
    Collection dédiée : mepua_data
 
    Ce script s'exécute AVANT tout le reste de la page : il va
@@ -29,7 +30,7 @@
    appareil qui n'a jamais ouvert Mepua auparavant.
    ============================================================ */
 (function() {
-  var PROJECT_ID = 'gestion-c99df';
+  var PROJECT_ID = 'emploi-temps';
   var COLLECTION = 'mepua_data';
   var BASE_URL = 'https://firestore.googleapis.com/v1/projects/' + PROJECT_ID + '/databases/(default)/documents/' + COLLECTION;
 
@@ -163,6 +164,49 @@
     bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#0d2137;color:#fff;text-align:center;padding:12px;font-family:sans-serif;font-size:14px;cursor:pointer;box-shadow:0 -2px 10px rgba(0,0,0,.25);';
     bar.onclick = function() { location.reload(); };
     document.body.appendChild(bar);
+  }
+
+  /* ============================================================
+     SYNCHRO EN DIRECT DES ÉLÈVES (Emploi du temps → MEPUA)
+     Le module Emploi du temps écrit la liste complète des élèves
+     dans mepua_data/ge_etudiants (même format que la synchro
+     automatique ci-dessus). On écoute CE document précis en
+     temps réel : dès qu'un élève est ajouté/supprimé côté Emploi
+     du temps, la liste "ge_etudiants" est mise à jour ici et
+     l'onglet Étudiants se rafraîchit tout seul, sans recharger
+     la page.
+     ============================================================ */
+  if (ready) {
+    var geLiveSyncFirstSnap = true;
+    db.collection('mepua_data').doc('ge_etudiants').onSnapshot({ includeMetadataChanges: true }, function(snap) {
+      // Ignore nos propres écritures locales pas encore confirmées par le serveur
+      if (snap.metadata.hasPendingWrites) return;
+      // Ignore le tout premier instantané : ces données sont déjà prises en compte
+      // par la récupération synchrone (pullPage) exécutée avant le chargement de la page.
+      if (geLiveSyncFirstSnap) { geLiveSyncFirstSnap = false; return; }
+      if (!snap.exists) return;
+      var raw = snap.data() && snap.data().value;
+      if (typeof raw !== 'string') return;
+      // Écrit directement en localStorage via la méthode d'origine (sans repasser par
+      // l'intercepteur setItem) pour ne pas déclencher une réécriture inutile vers le cloud.
+      _setItem.call(window.localStorage, 'ge_etudiants', raw);
+      if (typeof geLoad === 'function') geLoad();
+      if (typeof geRenderEtudiants === 'function') geRenderEtudiants();
+      if (typeof geRenderDashboard === 'function') geRenderDashboard();
+      if (typeof updateWelcomeKPIs === 'function') updateWelcomeKPIs();
+      if (typeof geFicheInitSelects === 'function' && document.getElementById('ge-fiche-eleve')?.classList.contains('ge-active')) geFicheInitSelects();
+      showEleveLiveSyncToast();
+    }, function() {});
+  }
+
+  function showEleveLiveSyncToast() {
+    if (document.getElementById('mepuaEleveSyncToast') || !document.body) return;
+    var bar = document.createElement('div');
+    bar.id = 'mepuaEleveSyncToast';
+    bar.textContent = '🔄 Liste des élèves mise à jour (synchro Emploi du temps)';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#1d6f3f;color:#fff;text-align:center;padding:10px;font-family:sans-serif;font-size:13px;box-shadow:0 -2px 10px rgba(0,0,0,.25);';
+    document.body.appendChild(bar);
+    setTimeout(function() { bar.remove(); }, 3000);
   }
 })();
 </script>
