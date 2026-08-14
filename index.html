@@ -8177,17 +8177,30 @@ document.addEventListener('DOMContentLoaded', function() {
   } catch (e) {}
 });
 
-// Synchronise le nom de l'établissement vers le bloc d'impression
+// Synchronise le nom de l'établissement vers le bloc d'impression + sauvegarde permanente
 function syncPrintHeader() {
   const h1 = document.querySelector('.header-title h1');
   const phName = document.getElementById('ph-etab-name');
   if (h1 && phName) phName.textContent = h1.textContent;
 }
+function saveHeaderEtabNom() {
+  const h1 = document.querySelector('.header-title h1');
+  if (h1) {
+    try { localStorage.setItem('mepua_header_etab_nom', h1.textContent || ''); } catch (e) {}
+  }
+}
 document.addEventListener('DOMContentLoaded', function() {
   const h1 = document.querySelector('.header-title h1');
   if (h1) {
+    // Restaure le nom précédemment enregistré
+    try {
+      const saved = localStorage.getItem('mepua_header_etab_nom');
+      if (saved) h1.textContent = saved;
+    } catch (e) {}
     h1.addEventListener('input', syncPrintHeader);
     h1.addEventListener('blur', syncPrintHeader);
+    h1.addEventListener('input', saveHeaderEtabNom);
+    h1.addEventListener('blur', saveHeaderEtabNom);
     syncPrintHeader();
   }
 });
